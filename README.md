@@ -10,4 +10,4 @@ $ cargo install cargo-make
 $ cargo make build-release
 ```
 
-check output: `./target/lambda/release/`
+check output: `./target/release/`
