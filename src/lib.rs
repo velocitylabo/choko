@@ -260,3 +260,268 @@ impl Choko {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // --- compile_path tests ---
+
+    #[test]
+    fn compile_path_root() {
+        let segments = compile_path("/");
+        assert!(segments.is_empty());
+    }
+
+    #[test]
+    fn compile_path_literal() {
+        let segments = compile_path("/users/list");
+        assert_eq!(segments.len(), 2);
+        assert!(matches!(&segments[0], Segment::Literal(s) if s == "users"));
+        assert!(matches!(&segments[1], Segment::Literal(s) if s == "list"));
+    }
+
+    #[test]
+    fn compile_path_with_param() {
+        let segments = compile_path("/users/{user_id}/posts/{post_id}");
+        assert_eq!(segments.len(), 4);
+        assert!(matches!(&segments[0], Segment::Literal(s) if s == "users"));
+        assert!(matches!(&segments[1], Segment::Param(s) if s == "user_id"));
+        assert!(matches!(&segments[2], Segment::Literal(s) if s == "posts"));
+        assert!(matches!(&segments[3], Segment::Param(s) if s == "post_id"));
+    }
+
+    // --- match_path tests ---
+
+    #[test]
+    fn match_root_path() {
+        let segments = compile_path("/");
+        assert!(match_path(&segments, "/").is_some());
+        assert!(match_path(&segments, "").is_some());
+    }
+
+    #[test]
+    fn match_literal_path() {
+        let segments = compile_path("/users/list");
+        assert!(match_path(&segments, "/users/list").is_some());
+        assert!(match_path(&segments, "/users/other").is_none());
+        assert!(match_path(&segments, "/users").is_none());
+        assert!(match_path(&segments, "/users/list/extra").is_none());
+    }
+
+    #[test]
+    fn match_path_extracts_single_param() {
+        let segments = compile_path("/users/{user_id}");
+        let params = match_path(&segments, "/users/42").unwrap();
+        assert_eq!(params.get("user_id").unwrap(), "42");
+    }
+
+    #[test]
+    fn match_path_extracts_multiple_params() {
+        let segments = compile_path("/users/{user_id}/posts/{post_id}");
+        let params = match_path(&segments, "/users/7/posts/99").unwrap();
+        assert_eq!(params.get("user_id").unwrap(), "7");
+        assert_eq!(params.get("post_id").unwrap(), "99");
+    }
+
+    #[test]
+    fn match_path_rejects_wrong_length() {
+        let segments = compile_path("/users/{id}");
+        assert!(match_path(&segments, "/users").is_none());
+        assert!(match_path(&segments, "/users/1/extra").is_none());
+    }
+
+    #[test]
+    fn match_path_rejects_wrong_literal() {
+        let segments = compile_path("/api/users");
+        assert!(match_path(&segments, "/api/posts").is_none());
+    }
+
+    // --- Response builder tests ---
+
+    #[test]
+    fn response_json_defaults_to_200() {
+        let resp = Response::json(json!({"ok": true}));
+        assert_eq!(resp.status_code, 200);
+        assert_eq!(resp.body, json!({"ok": true}));
+        assert!(resp.headers.is_empty());
+    }
+
+    #[test]
+    fn response_with_status() {
+        let resp = Response::json(json!(null)).with_status(404);
+        assert_eq!(resp.status_code, 404);
+    }
+
+    #[test]
+    fn response_with_header() {
+        let resp = Response::json(json!(null))
+            .with_header("X-Custom", "value1")
+            .with_header("X-Other", "value2");
+        assert_eq!(resp.headers.get("X-Custom").unwrap(), "value1");
+        assert_eq!(resp.headers.get("X-Other").unwrap(), "value2");
+    }
+
+    // --- dispatch integration tests ---
+
+    fn make_apigw_request(method: &str, path: &str, body: Option<String>) -> ApiGatewayProxyRequest {
+        let method: http::Method = method.parse().unwrap();
+        ApiGatewayProxyRequest {
+            http_method: method,
+            path: Some(path.to_string()),
+            body,
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn dispatch_matches_get_root() {
+        let mut app = Choko::new("test");
+        app.route("/", &["GET"], |_req| async {
+            Ok(Response::json(json!({"hello": "world"})))
+        });
+
+        let event = make_apigw_request("GET", "/", None);
+        let resp = app.dispatch(event).await.unwrap();
+
+        assert_eq!(resp.status_code, 200);
+        let body: Value = serde_json::from_str(
+            match resp.body.as_ref().unwrap() {
+                Body::Text(s) => s,
+                _ => panic!("expected text body"),
+            }
+        ).unwrap();
+        assert_eq!(body, json!({"hello": "world"}));
+    }
+
+    #[tokio::test]
+    async fn dispatch_extracts_path_params() {
+        let mut app = Choko::new("test");
+        app.route("/users/{user_id}", &["GET"], |req| async move {
+            let uid = req.path_params.get("user_id").cloned().unwrap_or_default();
+            Ok(Response::json(json!({"user_id": uid})))
+        });
+
+        let event = make_apigw_request("GET", "/users/123", None);
+        let resp = app.dispatch(event).await.unwrap();
+
+        assert_eq!(resp.status_code, 200);
+        let body: Value = serde_json::from_str(
+            match resp.body.as_ref().unwrap() {
+                Body::Text(s) => s,
+                _ => panic!("expected text body"),
+            }
+        ).unwrap();
+        assert_eq!(body["user_id"], "123");
+    }
+
+    #[tokio::test]
+    async fn dispatch_returns_404_for_unknown_path() {
+        let mut app = Choko::new("test");
+        app.route("/", &["GET"], |_req| async {
+            Ok(Response::json(json!({"ok": true})))
+        });
+
+        let event = make_apigw_request("GET", "/unknown", None);
+        let resp = app.dispatch(event).await.unwrap();
+
+        assert_eq!(resp.status_code, 404);
+    }
+
+    #[tokio::test]
+    async fn dispatch_returns_405_for_wrong_method() {
+        let mut app = Choko::new("test");
+        app.route("/users", &["POST"], |_req| async {
+            Ok(Response::json(json!({"created": true})))
+        });
+
+        let event = make_apigw_request("GET", "/users", None);
+        let resp = app.dispatch(event).await.unwrap();
+
+        assert_eq!(resp.status_code, 405);
+    }
+
+    #[tokio::test]
+    async fn dispatch_with_json_body() {
+        let mut app = Choko::new("test");
+        app.route("/items", &["POST"], |req| async move {
+            let name = req.json_body
+                .as_ref()
+                .and_then(|v| v.get("name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            Ok(Response::json(json!({"received": name})).with_status(201))
+        });
+
+        let body = json!({"name": "test-item"}).to_string();
+        let event = make_apigw_request("POST", "/items", Some(body));
+        let resp = app.dispatch(event).await.unwrap();
+
+        assert_eq!(resp.status_code, 201);
+        let body: Value = serde_json::from_str(
+            match resp.body.as_ref().unwrap() {
+                Body::Text(s) => s,
+                _ => panic!("expected text body"),
+            }
+        ).unwrap();
+        assert_eq!(body["received"], "test-item");
+    }
+
+    #[tokio::test]
+    async fn dispatch_multiple_routes() {
+        let mut app = Choko::new("test");
+        app.route("/", &["GET"], |_req| async {
+            Ok(Response::json(json!({"route": "index"})))
+        });
+        app.route("/users", &["GET"], |_req| async {
+            Ok(Response::json(json!({"route": "users_list"})))
+        });
+        app.route("/users/{id}", &["GET"], |_req| async {
+            Ok(Response::json(json!({"route": "user_detail"})))
+        });
+
+        let extract_route = |resp: ApiGatewayProxyResponse| -> String {
+            let body: Value = serde_json::from_str(
+                match resp.body.as_ref().unwrap() {
+                    Body::Text(s) => s,
+                    _ => panic!("expected text body"),
+                }
+            ).unwrap();
+            body["route"].as_str().unwrap().to_string()
+        };
+
+        let resp = app.dispatch(make_apigw_request("GET", "/", None)).await.unwrap();
+        assert_eq!(extract_route(resp), "index");
+
+        let resp = app.dispatch(make_apigw_request("GET", "/users", None)).await.unwrap();
+        assert_eq!(extract_route(resp), "users_list");
+
+        let resp = app.dispatch(make_apigw_request("GET", "/users/5", None)).await.unwrap();
+        assert_eq!(extract_route(resp), "user_detail");
+    }
+
+    #[tokio::test]
+    async fn dispatch_response_has_content_type_header() {
+        let mut app = Choko::new("test");
+        app.route("/", &["GET"], |_req| async {
+            Ok(Response::json(json!({})))
+        });
+
+        let resp = app.dispatch(make_apigw_request("GET", "/", None)).await.unwrap();
+        let ct = resp.headers.get(http::header::CONTENT_TYPE).unwrap();
+        assert_eq!(ct, "application/json");
+    }
+
+    #[tokio::test]
+    async fn dispatch_custom_response_headers() {
+        let mut app = Choko::new("test");
+        app.route("/", &["GET"], |_req| async {
+            Ok(Response::json(json!({})).with_header("x-request-id", "abc-123"))
+        });
+
+        let resp = app.dispatch(make_apigw_request("GET", "/", None)).await.unwrap();
+        let val = resp.headers.get("x-request-id").unwrap();
+        assert_eq!(val, "abc-123");
+    }
+}
