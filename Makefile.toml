@@ -1,0 +1,28 @@
+[config]
+default_to_workspace = false
+
+[tasks.build-release]
+description = "Build the project in release mode"
+command = "cargo"
+args = ["build", "--release"]
+
+[tasks.build-release.env]
+RUSTFLAGS = "-C target-cpu=native"
+
+[tasks.test]
+description = "Run all tests"
+command = "cargo"
+args = ["test"]
+
+[tasks.clean]
+description = "Clean build artifacts"
+command = "cargo"
+args = ["clean"]
+
+[tasks.package]
+description = "Build release binary and create Lambda deployment zip"
+dependencies = ["build-release"]
+script = [
+    "cd target/release && zip -j ../../bootstrap.zip choko",
+    "echo 'Created bootstrap.zip for Lambda deployment'"
+]
