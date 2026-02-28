@@ -96,14 +96,17 @@ The handler receives a `Request` with:
 | Field | Type | Description |
 |---|---|---|
 | `path_params` | `HashMap<String, String>` | URL path parameters |
-| `query_params` | `HashMap<String, String>` | Query string parameters |
+| `query_params` | `HashMap<String, Vec<String>>` | Query string parameters (multi-value) |
 | `headers` | `HashMap<String, String>` | HTTP headers |
 | `body` | `Option<String>` | Raw request body |
 | `json_body` | `Option<Value>` | Parsed JSON body |
 
 ```rust
 app.route("/search", &["GET"], |req| async move {
-    let query = req.query_params.get("q").cloned().unwrap_or_default();
+    let query = req.query_params.get("q")
+        .and_then(|v| v.first())
+        .cloned()
+        .unwrap_or_default();
     Ok(Response::json(json!({"query": query})))
 });
 ```
@@ -129,10 +132,10 @@ If a handler returns `Err`, choko automatically responds with HTTP 500:
 
 ```rust
 app.route("/risky", &["GET"], |_req| async {
-    let result: Result<String, _> = std::fs::read_to_string("/tmp/data.json");
+    let result = tokio::fs::read_to_string("/tmp/data.json").await;
     match result {
         Ok(data) => Ok(Response::json(json!({"data": data}))),
-        Err(e) => Err(e.into()),  // -> 500 {"error": "Internal Server Error: ..."}
+        Err(e) => Err(e.into()),  // -> 500 {"error": "Internal Server Error"}
     }
 });
 ```
