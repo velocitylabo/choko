@@ -1,6 +1,5 @@
-use choko::{Choko, Request, Response};
-use lambda_runtime::Error;
-use serde_json::json;
+use choko::serde_json::json;
+use choko::{Choko, Error, Request, Response};
 
 async fn index(_req: Request) -> Result<Response, Error> {
     Ok(Response::json(json!({"message": "Hello from Choko!"})))
