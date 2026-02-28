@@ -1,6 +1,8 @@
 use aws_lambda_events::encodings::Body;
 use aws_lambda_events::event::apigw::{ApiGatewayProxyRequest, ApiGatewayProxyResponse};
-use lambda_runtime::{service_fn, Error, LambdaEvent};
+pub use lambda_runtime::Error;
+use lambda_runtime::{service_fn, LambdaEvent};
+pub use serde_json;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::future::Future;

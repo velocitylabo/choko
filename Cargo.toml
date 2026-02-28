@@ -4,8 +4,11 @@ version = "0.1.0"
 edition = "2021"
 authors = ["piroz"]
 license = "MIT"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Rust serverless microframework for AWS Lambda, inspired by AWS Chalice"
+repository = "https://github.com/velocitylabo/choko"
+readme = "README.md"
+keywords = ["aws", "lambda", "serverless", "framework"]
+categories = ["web-programming::http-server", "asynchronous"]
 
 [dependencies]
 lambda_runtime = "0.8.0"
