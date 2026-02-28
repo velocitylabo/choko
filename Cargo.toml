@@ -23,7 +23,7 @@ serde = "1.0"
 http = "1.0"
 clap = { version = "4", features = ["derive", "env"], optional = true }
 toml = { version = "0.8", optional = true }
-zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+zip = { version = "8", default-features = false, features = ["deflate-flate2-zlib-rs"], optional = true }
 
 [[bin]]
 name = "choko"
