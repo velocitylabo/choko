@@ -193,11 +193,15 @@ This single command will:
 | `--stage` | | `prod` | API Gateway stage name |
 | `--memory` | | `128` | Lambda memory (MB) |
 | `--timeout` | | `30` | Lambda timeout (seconds) |
+| `--target` | | `x86_64-unknown-linux-gnu` | Rust target triple for cross-compilation |
+
+> `--target` に `aarch64-unknown-linux-gnu` を指定すると、Lambda の architecture が自動的に `arm64` に設定されます。
 
 #### Package only (no deploy)
 
 ```bash
 choko package
+choko package --target aarch64-unknown-linux-gnu  # ARM64 向け
 ```
 
 ## License
