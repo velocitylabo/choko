@@ -10,6 +10,10 @@ readme = "README.md"
 keywords = ["aws", "lambda", "serverless", "framework"]
 categories = ["web-programming::http-server", "asynchronous"]
 
+[features]
+default = []
+cli = ["clap", "toml"]
+
 [dependencies]
 lambda_runtime = "1.0"
 aws_lambda_events = { version = "1.0", default-features = false, features = ["apigw"] }
@@ -17,3 +21,10 @@ tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 serde = "1.0"
 http = "1.0"
+clap = { version = "4", features = ["derive", "env"], optional = true }
+toml = { version = "0.8", optional = true }
+
+[[bin]]
+name = "choko"
+path = "src/bin/choko.rs"
+required-features = ["cli"]
