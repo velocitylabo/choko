@@ -20,9 +20,16 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Build and create bootstrap.zip for Lambda deployment
-    Package,
+    Package(PackageArgs),
     /// Deploy the application to AWS Lambda + API Gateway
     Deploy(DeployArgs),
+}
+
+#[derive(clap::Args)]
+struct PackageArgs {
+    /// Rust target triple for cross-compilation (e.g. aarch64-unknown-linux-gnu)
+    #[arg(long, default_value = "x86_64-unknown-linux-gnu")]
+    target: String,
 }
 
 #[derive(clap::Args)]
@@ -50,12 +57,16 @@ struct DeployArgs {
     /// Lambda timeout in seconds
     #[arg(long, default_value = "30")]
     timeout: u32,
+
+    /// Rust target triple for cross-compilation (e.g. aarch64-unknown-linux-gnu)
+    #[arg(long, default_value = "x86_64-unknown-linux-gnu")]
+    target: String,
 }
 
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Package => package().map(|_| ()),
+        Commands::Package(args) => package(&args.target),
         Commands::Deploy(args) => deploy(args),
     };
     if let Err(e) = result {
@@ -129,19 +140,28 @@ fn parse_json(raw: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(raw).map_err(|e| format!("Failed to parse JSON: {e}"))
 }
 
+/// Derive the Lambda architecture string from a Rust target triple.
+fn lambda_arch(target: &str) -> &str {
+    if target.starts_with("aarch64") {
+        "arm64"
+    } else {
+        "x86_64"
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Package
 // ---------------------------------------------------------------------------
 
-fn package() -> Result<String, String> {
+fn package(target: &str) -> Result<(), String> {
     let pkg = get_package_name()?;
     // Cargo converts hyphens to underscores in binary names
     let bin_name = pkg.replace('-', "_");
 
-    println!("Building release binary...");
-    run_visible("cargo", &["build", "--release"])?;
+    println!("Building release binary for {target}...");
+    run_visible("cargo", &["build", "--release", "--target", target])?;
 
-    let bin_path = format!("target/release/{bin_name}");
+    let bin_path = format!("target/{target}/release/{bin_name}");
     if !Path::new(&bin_path).exists() {
         return Err(format!("Binary not found at {bin_path}"));
     }
@@ -150,7 +170,7 @@ fn package() -> Result<String, String> {
     create_bootstrap_zip(&bin_path)?;
 
     println!("Created bootstrap.zip");
-    Ok("bootstrap.zip".to_string())
+    Ok(())
 }
 
 fn create_bootstrap_zip(binary_path: &str) -> Result<(), String> {
@@ -187,7 +207,7 @@ fn deploy(args: DeployArgs) -> Result<(), String> {
     let region = &args.region;
 
     // 1. Package
-    package()?;
+    package(&args.target)?;
 
     // 2. Lambda — returns the function ARN for API Gateway integration
     let function_arn = ensure_lambda(function_name, region, &args)?;
@@ -229,6 +249,7 @@ fn lambda_exists(name: &str, region: &str) -> bool {
 fn ensure_lambda(name: &str, region: &str, args: &DeployArgs) -> Result<String, String> {
     let mem = args.memory.to_string();
     let tout = args.timeout.to_string();
+    let arch = lambda_arch(&args.target);
 
     let arn = if lambda_exists(name, region) {
         println!("Updating Lambda function: {name}");
@@ -239,6 +260,8 @@ fn ensure_lambda(name: &str, region: &str, args: &DeployArgs) -> Result<String, 
             name,
             "--zip-file",
             "fileb://bootstrap.zip",
+            "--architectures",
+            arch,
             "--region",
             region,
         ])?;
@@ -286,7 +309,7 @@ fn ensure_lambda(name: &str, region: &str, args: &DeployArgs) -> Result<String, 
             "--handler",
             "bootstrap",
             "--architectures",
-            "x86_64",
+            arch,
             "--role",
             &args.role_arn,
             "--zip-file",
@@ -429,8 +452,8 @@ fn setup_proxy_integration(
     // --- wire up root (/) and {proxy+} ---
     println!("Setting up Lambda proxy integration...");
     for resource_id in [&root_id, &proxy_id] {
-        // put-method may fail if already exists — that is fine
-        let _ = aws(&[
+        // put-method may fail if the method already exists — only warn on unexpected errors
+        if let Err(e) = aws(&[
             "apigateway",
             "put-method",
             "--rest-api-id",
@@ -443,7 +466,11 @@ fn setup_proxy_integration(
             "NONE",
             "--region",
             region,
-        ]);
+        ]) {
+            if !e.contains("ConflictException") {
+                eprintln!("Warning: put-method failed: {e}");
+            }
+        }
 
         aws(&[
             "apigateway",
@@ -469,7 +496,8 @@ fn setup_proxy_integration(
     let account_id = get_account_id(region)?;
     let source_arn = format!("arn:aws:execute-api:{region}:{account_id}:{api_id}/*");
 
-    let _ = aws(&[
+    // remove-permission may fail if the statement doesn't exist yet
+    if let Err(e) = aws(&[
         "lambda",
         "remove-permission",
         "--function-name",
@@ -478,7 +506,12 @@ fn setup_proxy_integration(
         "choko-apigateway",
         "--region",
         region,
-    ]);
+    ]) {
+        if !e.contains("ResourceNotFoundException") {
+            eprintln!("Warning: remove-permission failed: {e}");
+        }
+    }
+
     aws(&[
         "lambda",
         "add-permission",
