@@ -9,11 +9,12 @@ use std::future::Future;
 use std::pin::Pin;
 
 /// A request object passed to route handlers.
+#[derive(Debug)]
 pub struct Request {
     /// Path parameters extracted from the URL pattern (e.g., `{user_id}` -> "123").
     pub path_params: HashMap<String, String>,
-    /// Query string parameters.
-    pub query_params: HashMap<String, String>,
+    /// Query string parameters (multi-value).
+    pub query_params: HashMap<String, Vec<String>>,
     /// HTTP headers.
     pub headers: HashMap<String, String>,
     /// The raw request body as a string.
@@ -23,6 +24,7 @@ pub struct Request {
 }
 
 /// A response builder for route handlers.
+#[derive(Debug)]
 pub struct Response {
     pub status_code: i64,
     pub body: Value,
@@ -56,7 +58,6 @@ type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 type HandlerFn = Box<dyn Fn(Request) -> BoxFuture<Result<Response, Error>> + Send + Sync>;
 
 struct Route {
-    _path_pattern: String,
     methods: Vec<String>,
     handler: HandlerFn,
     segments: Vec<Segment>,
@@ -74,8 +75,8 @@ fn compile_path(pattern: &str) -> Vec<Segment> {
         .split('/')
         .filter(|s| !s.is_empty())
         .map(|s| {
-            if s.starts_with('{') && s.ends_with('}') {
-                Segment::Param(s[1..s.len() - 1].to_string())
+            if let Some(name) = s.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
+                Segment::Param(name.to_string())
             } else {
                 Segment::Literal(s.to_string())
             }
@@ -115,17 +116,13 @@ fn match_path(segments: &[Segment], path: &str) -> Option<HashMap<String, String
 
 /// The main application struct for the Choko framework.
 pub struct Choko {
-    _app_name: String,
     routes: Vec<Route>,
 }
 
 impl Choko {
     /// Create a new Choko application.
-    pub fn new(app_name: impl Into<String>) -> Self {
-        Self {
-            _app_name: app_name.into(),
-            routes: Vec::new(),
-        }
+    pub fn new(_app_name: impl Into<String>) -> Self {
+        Self { routes: Vec::new() }
     }
 
     /// Register a route with the given path pattern, HTTP methods, and handler.
@@ -145,7 +142,6 @@ impl Choko {
         let segments = compile_path(path);
         let methods = methods.iter().map(|m| m.to_uppercase()).collect();
         self.routes.push(Route {
-            _path_pattern: path.to_string(),
             methods,
             handler: Box::new(move |req| Box::pin(handler(req))),
             segments,
@@ -180,7 +176,8 @@ impl Choko {
                     return match (route.handler)(request).await {
                         Ok(response) => Ok(self.build_apigw_response(response)),
                         Err(e) => {
-                            Ok(self.error_response(500, &format!("Internal Server Error: {e}")))
+                            eprintln!("Handler error: {e}");
+                            Ok(self.error_response(500, "Internal Server Error"))
                         }
                     };
                 }
@@ -199,11 +196,21 @@ impl Choko {
         event: &ApiGatewayProxyRequest,
         path_params: HashMap<String, String>,
     ) -> Request {
-        let query_params = event
-            .query_string_parameters
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
-            .collect();
+        let mut query_params: HashMap<String, Vec<String>> = HashMap::new();
+        for (k, v) in event.multi_value_query_string_parameters.iter() {
+            query_params
+                .entry(k.to_string())
+                .or_default()
+                .push(v.to_string());
+        }
+        if query_params.is_empty() {
+            for (k, v) in event.query_string_parameters.iter() {
+                query_params
+                    .entry(k.to_string())
+                    .or_default()
+                    .push(v.to_string());
+            }
+        }
 
         let headers = event
             .headers
@@ -233,11 +240,19 @@ impl Choko {
             http::HeaderValue::from_static("application/json"),
         );
         for (k, v) in &resp.headers {
-            if let (Ok(name), Ok(val)) = (
+            match (
                 http::header::HeaderName::from_bytes(k.as_bytes()),
                 http::HeaderValue::from_str(v),
             ) {
-                headers.insert(name, val);
+                (Ok(name), Ok(val)) => {
+                    headers.insert(name, val);
+                }
+                (Err(e), _) => {
+                    eprintln!("Invalid header name {k:?}: {e}");
+                }
+                (_, Err(e)) => {
+                    eprintln!("Invalid header value for {k:?}: {e}");
+                }
             }
         }
 
@@ -559,9 +574,6 @@ mod tests {
             _ => panic!("expected text body"),
         })
         .unwrap();
-        assert!(body["error"]
-            .as_str()
-            .unwrap()
-            .contains("something went wrong"));
+        assert_eq!(body["error"].as_str().unwrap(), "Internal Server Error");
     }
 }
