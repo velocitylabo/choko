@@ -11,9 +11,9 @@ keywords = ["aws", "lambda", "serverless", "framework"]
 categories = ["web-programming::http-server", "asynchronous"]
 
 [dependencies]
-lambda_runtime = "0.8.0"
-aws_lambda_events = "0.8.5"
+lambda_runtime = "1.0"
+aws_lambda_events = { version = "1.0", default-features = false, features = ["apigw"] }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-http = "0.2"
+http = "1.0"
