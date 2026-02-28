@@ -144,10 +144,14 @@ Unmatched paths return 404, and wrong HTTP methods return 405.
 
 ## Build & Deploy
 
-```bash
-# Install cargo-make
-cargo install cargo-make
+### Prerequisites
 
+- [cargo-make](https://github.com/sagiegurari/cargo-make): `cargo install cargo-make`
+- AWS CLI (configured with valid credentials)
+
+### Manual packaging
+
+```bash
 # Build release binary
 cargo make build-release
 
@@ -158,7 +162,43 @@ cargo make test
 cargo make package
 ```
 
-Deploy `bootstrap.zip` to AWS Lambda with the **Custom runtime on Amazon Linux 2** runtime, then connect it to an API Gateway REST API with Lambda proxy integration enabled.
+### One-command deploy with `choko` CLI
+
+Install the CLI:
+
+```bash
+cargo install choko --features cli
+```
+
+Deploy to AWS Lambda + API Gateway:
+
+```bash
+choko deploy --role-arn arn:aws:iam::123456789012:role/my-lambda-role
+```
+
+This single command will:
+
+1. Build a release binary and package `bootstrap.zip`
+2. Create (or update) a Lambda function using the `provided.al2023` runtime
+3. Create (or update) an API Gateway REST API with `{proxy+}` integration
+4. Deploy to a stage and print the endpoint URL
+
+#### CLI options
+
+| Option | Env var | Default | Description |
+|---|---|---|---|
+| `--role-arn` | `CHOKO_ROLE_ARN` | *(required)* | IAM role ARN for the Lambda function |
+| `--region` | `AWS_DEFAULT_REGION` | `ap-northeast-1` | AWS region |
+| `--function-name` | | Cargo.toml `name` | Lambda function name |
+| `--stage` | | `prod` | API Gateway stage name |
+| `--memory` | | `128` | Lambda memory (MB) |
+| `--timeout` | | `30` | Lambda timeout (seconds) |
+
+#### Package only (no deploy)
+
+```bash
+choko package
+```
 
 ## License
 
