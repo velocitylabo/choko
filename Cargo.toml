@@ -12,7 +12,7 @@ categories = ["web-programming::http-server", "asynchronous"]
 
 [features]
 default = []
-cli = ["clap", "toml"]
+cli = ["clap", "toml", "zip"]
 
 [dependencies]
 lambda_runtime = "1.0"
@@ -23,6 +23,7 @@ serde = "1.0"
 http = "1.0"
 clap = { version = "4", features = ["derive", "env"], optional = true }
 toml = { version = "0.8", optional = true }
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
 
 [[bin]]
 name = "choko"
