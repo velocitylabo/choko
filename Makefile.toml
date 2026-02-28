@@ -20,6 +20,7 @@ command = "cargo"
 args = ["clean"]
 
 [tasks.package]
+clear = true
 description = "Build release binary and create Lambda deployment zip"
 dependencies = ["build-release"]
 script = [
