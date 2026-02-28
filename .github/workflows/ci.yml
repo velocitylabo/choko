@@ -29,6 +29,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -- -D warnings
+      - run: cargo clippy --features cli -- -D warnings
 
   format:
     name: Format
@@ -48,3 +49,4 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release
+      - run: cargo build --release --features cli
