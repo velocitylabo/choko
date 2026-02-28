@@ -177,8 +177,12 @@ impl Choko {
                 path_matched = true;
                 if route.methods.contains(&method) {
                     let request = self.build_request(&event, path_params);
-                    let response = (route.handler)(request).await?;
-                    return Ok(self.build_apigw_response(response));
+                    return match (route.handler)(request).await {
+                        Ok(response) => Ok(self.build_apigw_response(response)),
+                        Err(e) => {
+                            Ok(self.error_response(500, &format!("Internal Server Error: {e}")))
+                        }
+                    };
                 }
             }
         }
@@ -237,13 +241,11 @@ impl Choko {
             }
         }
 
-        ApiGatewayProxyResponse {
-            status_code: resp.status_code,
-            headers,
-            body: Some(Body::Text(resp.body.to_string())),
-            is_base64_encoded: Some(false),
-            multi_value_headers: Default::default(),
-        }
+        let mut r = ApiGatewayProxyResponse::default();
+        r.status_code = resp.status_code;
+        r.headers = headers;
+        r.body = Some(Body::Text(resp.body.to_string()));
+        r
     }
 
     fn error_response(&self, status_code: i64, message: &str) -> ApiGatewayProxyResponse {
@@ -253,13 +255,11 @@ impl Choko {
             http::header::CONTENT_TYPE,
             http::HeaderValue::from_static("application/json"),
         );
-        ApiGatewayProxyResponse {
-            status_code,
-            headers,
-            body: Some(Body::Text(body.to_string())),
-            is_base64_encoded: Some(false),
-            multi_value_headers: Default::default(),
-        }
+        let mut r = ApiGatewayProxyResponse::default();
+        r.status_code = status_code;
+        r.headers = headers;
+        r.body = Some(Body::Text(body.to_string()));
+        r
     }
 }
 
@@ -372,13 +372,11 @@ mod tests {
         path: &str,
         body: Option<String>,
     ) -> ApiGatewayProxyRequest {
-        let method: http::Method = method.parse().unwrap();
-        ApiGatewayProxyRequest {
-            http_method: method,
-            path: Some(path.to_string()),
-            body,
-            ..Default::default()
-        }
+        let mut req = ApiGatewayProxyRequest::default();
+        req.http_method = method.parse().unwrap();
+        req.path = Some(path.to_string());
+        req.body = body;
+        req
     }
 
     #[tokio::test]
@@ -541,5 +539,29 @@ mod tests {
             .unwrap();
         let val = resp.headers.get("x-request-id").unwrap();
         assert_eq!(val, "abc-123");
+    }
+
+    #[tokio::test]
+    async fn dispatch_returns_500_on_handler_error() {
+        let mut app = Choko::new("test");
+        app.route("/fail", &["GET"], |_req| async {
+            Err::<Response, Error>("something went wrong".into())
+        });
+
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/fail", None))
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status_code, 500);
+        let body: Value = serde_json::from_str(match resp.body.as_ref().unwrap() {
+            Body::Text(s) => s,
+            _ => panic!("expected text body"),
+        })
+        .unwrap();
+        assert!(body["error"]
+            .as_str()
+            .unwrap()
+            .contains("something went wrong"));
     }
 }
