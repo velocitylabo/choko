@@ -54,7 +54,7 @@ type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 type HandlerFn = Box<dyn Fn(Request) -> BoxFuture<Result<Response, Error>> + Send + Sync>;
 
 struct Route {
-    path_pattern: String,
+    _path_pattern: String,
     methods: Vec<String>,
     handler: HandlerFn,
     segments: Vec<Segment>,
@@ -113,7 +113,7 @@ fn match_path(segments: &[Segment], path: &str) -> Option<HashMap<String, String
 
 /// The main application struct for the Choko framework.
 pub struct Choko {
-    app_name: String,
+    _app_name: String,
     routes: Vec<Route>,
 }
 
@@ -121,7 +121,7 @@ impl Choko {
     /// Create a new Choko application.
     pub fn new(app_name: impl Into<String>) -> Self {
         Self {
-            app_name: app_name.into(),
+            _app_name: app_name.into(),
             routes: Vec::new(),
         }
     }
@@ -143,7 +143,7 @@ impl Choko {
         let segments = compile_path(path);
         let methods = methods.iter().map(|m| m.to_uppercase()).collect();
         self.routes.push(Route {
-            path_pattern: path.to_string(),
+            _path_pattern: path.to_string(),
             methods,
             handler: Box::new(move |req| Box::pin(handler(req))),
             segments,
@@ -365,7 +365,11 @@ mod tests {
 
     // --- dispatch integration tests ---
 
-    fn make_apigw_request(method: &str, path: &str, body: Option<String>) -> ApiGatewayProxyRequest {
+    fn make_apigw_request(
+        method: &str,
+        path: &str,
+        body: Option<String>,
+    ) -> ApiGatewayProxyRequest {
         let method: http::Method = method.parse().unwrap();
         ApiGatewayProxyRequest {
             http_method: method,
@@ -386,12 +390,11 @@ mod tests {
         let resp = app.dispatch(event).await.unwrap();
 
         assert_eq!(resp.status_code, 200);
-        let body: Value = serde_json::from_str(
-            match resp.body.as_ref().unwrap() {
-                Body::Text(s) => s,
-                _ => panic!("expected text body"),
-            }
-        ).unwrap();
+        let body: Value = serde_json::from_str(match resp.body.as_ref().unwrap() {
+            Body::Text(s) => s,
+            _ => panic!("expected text body"),
+        })
+        .unwrap();
         assert_eq!(body, json!({"hello": "world"}));
     }
 
@@ -407,12 +410,11 @@ mod tests {
         let resp = app.dispatch(event).await.unwrap();
 
         assert_eq!(resp.status_code, 200);
-        let body: Value = serde_json::from_str(
-            match resp.body.as_ref().unwrap() {
-                Body::Text(s) => s,
-                _ => panic!("expected text body"),
-            }
-        ).unwrap();
+        let body: Value = serde_json::from_str(match resp.body.as_ref().unwrap() {
+            Body::Text(s) => s,
+            _ => panic!("expected text body"),
+        })
+        .unwrap();
         assert_eq!(body["user_id"], "123");
     }
 
@@ -446,7 +448,8 @@ mod tests {
     async fn dispatch_with_json_body() {
         let mut app = Choko::new("test");
         app.route("/items", &["POST"], |req| async move {
-            let name = req.json_body
+            let name = req
+                .json_body
                 .as_ref()
                 .and_then(|v| v.get("name"))
                 .and_then(|v| v.as_str())
@@ -459,12 +462,11 @@ mod tests {
         let resp = app.dispatch(event).await.unwrap();
 
         assert_eq!(resp.status_code, 201);
-        let body: Value = serde_json::from_str(
-            match resp.body.as_ref().unwrap() {
-                Body::Text(s) => s,
-                _ => panic!("expected text body"),
-            }
-        ).unwrap();
+        let body: Value = serde_json::from_str(match resp.body.as_ref().unwrap() {
+            Body::Text(s) => s,
+            _ => panic!("expected text body"),
+        })
+        .unwrap();
         assert_eq!(body["received"], "test-item");
     }
 
@@ -482,22 +484,30 @@ mod tests {
         });
 
         let extract_route = |resp: ApiGatewayProxyResponse| -> String {
-            let body: Value = serde_json::from_str(
-                match resp.body.as_ref().unwrap() {
-                    Body::Text(s) => s,
-                    _ => panic!("expected text body"),
-                }
-            ).unwrap();
+            let body: Value = serde_json::from_str(match resp.body.as_ref().unwrap() {
+                Body::Text(s) => s,
+                _ => panic!("expected text body"),
+            })
+            .unwrap();
             body["route"].as_str().unwrap().to_string()
         };
 
-        let resp = app.dispatch(make_apigw_request("GET", "/", None)).await.unwrap();
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/", None))
+            .await
+            .unwrap();
         assert_eq!(extract_route(resp), "index");
 
-        let resp = app.dispatch(make_apigw_request("GET", "/users", None)).await.unwrap();
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/users", None))
+            .await
+            .unwrap();
         assert_eq!(extract_route(resp), "users_list");
 
-        let resp = app.dispatch(make_apigw_request("GET", "/users/5", None)).await.unwrap();
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/users/5", None))
+            .await
+            .unwrap();
         assert_eq!(extract_route(resp), "user_detail");
     }
 
@@ -508,7 +518,10 @@ mod tests {
             Ok(Response::json(json!({})))
         });
 
-        let resp = app.dispatch(make_apigw_request("GET", "/", None)).await.unwrap();
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/", None))
+            .await
+            .unwrap();
         let ct = resp.headers.get(http::header::CONTENT_TYPE).unwrap();
         assert_eq!(ct, "application/json");
     }
@@ -520,7 +533,10 @@ mod tests {
             Ok(Response::json(json!({})).with_header("x-request-id", "abc-123"))
         });
 
-        let resp = app.dispatch(make_apigw_request("GET", "/", None)).await.unwrap();
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/", None))
+            .await
+            .unwrap();
         let val = resp.headers.get("x-request-id").unwrap();
         assert_eq!(val, "abc-123");
     }
