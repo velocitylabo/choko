@@ -30,6 +30,11 @@ struct PackageArgs {
     /// Rust target triple for cross-compilation (e.g. aarch64-unknown-linux-gnu)
     #[arg(long, default_value = "x86_64-unknown-linux-gnu")]
     target: String,
+
+    /// Use `cross` instead of `cargo` for cross-compilation (useful when Rust is installed via
+    /// Homebrew or without rustup). Requires Docker and `cargo install cross`.
+    #[arg(long)]
+    cross: bool,
 }
 
 #[derive(clap::Args)]
@@ -61,12 +66,17 @@ struct DeployArgs {
     /// Rust target triple for cross-compilation (e.g. aarch64-unknown-linux-gnu)
     #[arg(long, default_value = "x86_64-unknown-linux-gnu")]
     target: String,
+
+    /// Use `cross` instead of `cargo` for cross-compilation (useful when Rust is installed via
+    /// Homebrew or without rustup). Requires Docker and `cargo install cross`.
+    #[arg(long)]
+    cross: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
     let result = match cli.command {
-        Commands::Package(args) => package(&args.target),
+        Commands::Package(args) => package(&args.target, args.cross),
         Commands::Deploy(args) => deploy(args),
     };
     if let Err(e) = result {
@@ -153,13 +163,14 @@ fn lambda_arch(target: &str) -> &str {
 // Package
 // ---------------------------------------------------------------------------
 
-fn package(target: &str) -> Result<(), String> {
+fn package(target: &str, use_cross: bool) -> Result<(), String> {
     let pkg = get_package_name()?;
     // Cargo converts hyphens to underscores in binary names
     let bin_name = pkg.replace('-', "_");
 
+    let builder = if use_cross { "cross" } else { "cargo" };
     println!("Building release binary for {target}...");
-    run_visible("cargo", &["build", "--release", "--target", target])?;
+    run_visible(builder, &["build", "--release", "--target", target])?;
 
     let bin_path = format!("target/{target}/release/{bin_name}");
     if !Path::new(&bin_path).exists() {
@@ -207,7 +218,7 @@ fn deploy(args: DeployArgs) -> Result<(), String> {
     let region = &args.region;
 
     // 1. Package
-    package(&args.target)?;
+    package(&args.target, args.cross)?;
 
     // 2. Lambda — returns the function ARN for API Gateway integration
     let function_arn = ensure_lambda(function_name, region, &args)?;
