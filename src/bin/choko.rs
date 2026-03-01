@@ -163,14 +163,90 @@ fn lambda_arch(target: &str) -> &str {
 // Package
 // ---------------------------------------------------------------------------
 
+fn rustup_available() -> bool {
+    Command::new("rustup")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+fn build_with_docker(target: &str) -> Result<(), String> {
+    let (apt_pkg, linker_var) = match target {
+        "aarch64-unknown-linux-gnu" => (
+            "gcc-aarch64-linux-gnu",
+            "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc",
+        ),
+        "armv7-unknown-linux-gnueabihf" => (
+            "gcc-arm-linux-gnueabihf",
+            "CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_LINKER=arm-linux-gnueabihf-gcc",
+        ),
+        other => {
+            return Err(format!(
+                "Docker-based cross-compilation is not supported for `{other}`. \
+                 Install rustup (https://rustup.rs) and re-run with --cross."
+            ))
+        }
+    };
+
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("Cannot determine current directory: {e}"))?;
+    let cwd_str = cwd.to_str().ok_or("project path is not valid UTF-8")?;
+
+    let script = format!(
+        "apt-get update -qq 2>/dev/null \
+         && apt-get install -y -qq --no-install-recommends {apt_pkg} 2>/dev/null \
+         && rustup target add {target} 2>/dev/null \
+         && {linker_var} cargo build --release --target {target}"
+    );
+
+    println!("rustup not found — falling back to Docker cross-compilation (rust:slim)...");
+    let mut args = vec![
+        "run".to_string(),
+        "--rm".to_string(),
+        "-v".to_string(),
+        format!("{cwd_str}:/project"),
+        "-w".to_string(),
+        "/project".to_string(),
+    ];
+
+    // Mount local Cargo registry to cache downloaded crates across Docker builds.
+    if let Ok(home) = std::env::var("HOME") {
+        let registry = format!("{home}/.cargo/registry");
+        if Path::new(&registry).exists() {
+            args.push("-v".to_string());
+            args.push(format!("{registry}:/root/.cargo/registry"));
+        }
+    }
+
+    args.extend_from_slice(&[
+        "rust:slim".to_string(),
+        "sh".to_string(),
+        "-c".to_string(),
+        script,
+    ]);
+
+    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    run_visible("docker", &arg_refs)
+}
+
 fn package(target: &str, use_cross: bool) -> Result<(), String> {
     let pkg = get_package_name()?;
     // Cargo converts hyphens to underscores in binary names
     let bin_name = pkg.replace('-', "_");
 
-    let builder = if use_cross { "cross" } else { "cargo" };
     println!("Building release binary for {target}...");
-    run_visible(builder, &["build", "--release", "--target", target])?;
+    if use_cross {
+        if rustup_available() {
+            run_visible("cross", &["build", "--release", "--target", target])?;
+        } else {
+            build_with_docker(target)?;
+        }
+    } else {
+        run_visible("cargo", &["build", "--release", "--target", target])?;
+    }
 
     let bin_path = format!("target/{target}/release/{bin_name}");
     if !Path::new(&bin_path).exists() {
