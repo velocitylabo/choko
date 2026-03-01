@@ -4,7 +4,7 @@ default_to_workspace = false
 [tasks.build-release]
 description = "Build the project in release mode"
 command = "cargo"
-args = ["build", "--release"]
+args = ["build", "--release", "--features", "cli"]
 
 [tasks.build-release.env]
 RUSTFLAGS = "-C target-cpu=native"
