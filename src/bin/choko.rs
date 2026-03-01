@@ -173,7 +173,7 @@ fn rustup_available() -> bool {
         .unwrap_or(false)
 }
 
-fn build_with_docker(target: &str) -> Result<(), String> {
+fn build_with_docker(target: &str, bin_name: &str) -> Result<(), String> {
     let (apt_pkg, linker_var) = match target {
         "aarch64-unknown-linux-gnu" => (
             "gcc-aarch64-linux-gnu",
@@ -199,7 +199,7 @@ fn build_with_docker(target: &str) -> Result<(), String> {
         "apt-get update -qq 2>/dev/null \
          && apt-get install -y -qq --no-install-recommends {apt_pkg} 2>/dev/null \
          && rustup target add {target} 2>/dev/null \
-         && {linker_var} cargo build --release --target {target}"
+         && {linker_var} cargo build --release --target {target} --bin {bin_name}"
     );
 
     println!("rustup not found — falling back to Docker cross-compilation (rust:slim)...");
@@ -240,12 +240,12 @@ fn package(target: &str, use_cross: bool) -> Result<(), String> {
     println!("Building release binary for {target}...");
     if use_cross {
         if rustup_available() {
-            run_visible("cross", &["build", "--release", "--target", target])?;
+            run_visible("cross", &["build", "--release", "--target", target, "--bin", &bin_name])?;
         } else {
-            build_with_docker(target)?;
+            build_with_docker(target, &bin_name)?;
         }
     } else {
-        run_visible("cargo", &["build", "--release", "--target", target])?;
+        run_visible("cargo", &["build", "--release", "--target", target, "--bin", &bin_name])?;
     }
 
     let bin_path = format!("target/{target}/release/{bin_name}");
