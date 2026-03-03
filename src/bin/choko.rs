@@ -247,20 +247,53 @@ fn build_with_docker(target: &str, bin_name: &str) -> Result<(), String> {
     run_visible("docker", &arg_refs)
 }
 
+/// Returns a hint string when the current project's Cargo.toml lists `choko`
+/// as a plain registry dependency (not git/path), which won't work until
+/// choko is published to crates.io.
+fn choko_registry_dep_hint() -> Option<String> {
+    let content = fs::read_to_string("Cargo.toml").ok()?;
+    let parsed: toml::Value = content.parse().ok()?;
+    let choko_dep = parsed.get("dependencies")?.get("choko")?;
+    let is_registry = match choko_dep {
+        toml::Value::String(_) => true,
+        toml::Value::Table(t) => !t.contains_key("path") && !t.contains_key("git"),
+        _ => false,
+    };
+    if !is_registry {
+        return None;
+    }
+    Some(
+        "Hint: `choko` is not yet published to crates.io.\n\
+         Update your Cargo.toml to use the git source instead:\n\n  \
+         choko = { git = \"https://github.com/velocitylabo/choko\" }"
+            .to_string(),
+    )
+}
+
 fn package(target: &str, use_cross: bool) -> Result<(), String> {
     let pkg = get_package_name()?;
     // Cargo converts hyphens to underscores in binary names
     let bin_name = pkg.replace('-', "_");
 
     println!("Building release binary for {target}...");
-    if use_cross {
+    let build_result = if use_cross {
         if rustup_available() {
-            run_visible("cross", &["build", "--release", "--target", target, "--bin", &bin_name])?;
+            run_visible("cross", &["build", "--release", "--target", target, "--bin", &bin_name])
         } else {
-            build_with_docker(target, &bin_name)?;
+            build_with_docker(target, &bin_name)
         }
     } else {
-        run_visible("cargo", &["build", "--release", "--target", target, "--bin", &bin_name])?;
+        run_visible("cargo", &["build", "--release", "--target", target, "--bin", &bin_name])
+    };
+
+    if let Err(e) = build_result {
+        // If cargo couldn't find `choko` on crates.io, give the user a clear fix.
+        let hint = choko_registry_dep_hint();
+        if hint.is_some() && e.contains("exit status") {
+            let hint_text = hint.unwrap();
+            return Err(format!("{e}\n\n{hint_text}"));
+        }
+        return Err(e);
     }
 
     let bin_path = format!("target/{target}/release/{bin_name}");
