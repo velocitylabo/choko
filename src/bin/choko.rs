@@ -89,9 +89,24 @@ fn main() {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Find the nearest Cargo.toml by walking up from cwd, change into that
+/// directory, and return the package name.  Mirrors how `cargo` itself
+/// locates the manifest when invoked from a subdirectory.
 fn get_package_name() -> Result<String, String> {
-    let content =
-        fs::read_to_string("Cargo.toml").map_err(|e| format!("Failed to read Cargo.toml: {e}"))?;
+    let start = std::env::current_dir()
+        .map_err(|e| format!("Cannot determine current directory: {e}"))?;
+
+    let manifest_dir = start
+        .ancestors()
+        .find(|dir| dir.join("Cargo.toml").exists())
+        .ok_or("No Cargo.toml found in current directory or any parent directory")?
+        .to_path_buf();
+
+    std::env::set_current_dir(&manifest_dir)
+        .map_err(|e| format!("Failed to change to project root {}: {e}", manifest_dir.display()))?;
+
+    let content = fs::read_to_string("Cargo.toml")
+        .map_err(|e| format!("Failed to read Cargo.toml: {e}"))?;
     let parsed: toml::Value = content
         .parse()
         .map_err(|e| format!("Failed to parse Cargo.toml: {e}"))?;
