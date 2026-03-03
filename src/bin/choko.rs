@@ -272,8 +272,7 @@ fn choko_registry_dep_hint() -> Option<String> {
 
 fn package(target: &str, use_cross: bool) -> Result<(), String> {
     let pkg = get_package_name()?;
-    // Cargo converts hyphens to underscores in binary names
-    let bin_name = pkg.replace('-', "_");
+    let bin_name = &pkg;
 
     println!("Building release binary for {target}...");
     let build_result = if use_cross {
