@@ -148,6 +148,61 @@ impl Choko {
         });
     }
 
+    /// Register a GET route.
+    ///
+    /// Shortcut for `app.route(path, &["GET"], handler)`.
+    pub fn get<F, Fut>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Response, Error>> + Send + 'static,
+    {
+        self.route(path, &["GET"], handler);
+    }
+
+    /// Register a POST route.
+    ///
+    /// Shortcut for `app.route(path, &["POST"], handler)`.
+    pub fn post<F, Fut>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Response, Error>> + Send + 'static,
+    {
+        self.route(path, &["POST"], handler);
+    }
+
+    /// Register a PUT route.
+    ///
+    /// Shortcut for `app.route(path, &["PUT"], handler)`.
+    pub fn put<F, Fut>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Response, Error>> + Send + 'static,
+    {
+        self.route(path, &["PUT"], handler);
+    }
+
+    /// Register a DELETE route.
+    ///
+    /// Shortcut for `app.route(path, &["DELETE"], handler)`.
+    pub fn delete<F, Fut>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Response, Error>> + Send + 'static,
+    {
+        self.route(path, &["DELETE"], handler);
+    }
+
+    /// Register a PATCH route.
+    ///
+    /// Shortcut for `app.route(path, &["PATCH"], handler)`.
+    pub fn patch<F, Fut>(&mut self, path: &str, handler: F)
+    where
+        F: Fn(Request) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Result<Response, Error>> + Send + 'static,
+    {
+        self.route(path, &["PATCH"], handler);
+    }
+
     /// Run the application as an AWS Lambda handler.
     pub async fn run(self) -> Result<(), Error> {
         let app = std::sync::Arc::new(self);
@@ -575,5 +630,77 @@ mod tests {
         })
         .unwrap();
         assert_eq!(body["error"].as_str().unwrap(), "Internal Server Error");
+    }
+
+    // --- method shortcut tests ---
+
+    #[tokio::test]
+    async fn dispatch_via_get_shortcut() {
+        let mut app = Choko::new("test");
+        app.get("/items", |_req| async {
+            Ok(Response::json(json!({"method": "GET"})))
+        });
+
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/items", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status_code, 200);
+
+        let body: Value = serde_json::from_str(match resp.body.as_ref().unwrap() {
+            Body::Text(s) => s,
+            _ => panic!("expected text body"),
+        })
+        .unwrap();
+        assert_eq!(body["method"], "GET");
+    }
+
+    #[tokio::test]
+    async fn dispatch_via_post_shortcut() {
+        let mut app = Choko::new("test");
+        app.post("/items", |_req| async {
+            Ok(Response::json(json!({"method": "POST"})).with_status(201))
+        });
+
+        let resp = app
+            .dispatch(make_apigw_request("POST", "/items", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status_code, 201);
+
+        // GET should return 405
+        let resp = app
+            .dispatch(make_apigw_request("GET", "/items", None))
+            .await
+            .unwrap();
+        assert_eq!(resp.status_code, 405);
+    }
+
+    #[tokio::test]
+    async fn dispatch_via_put_delete_patch_shortcuts() {
+        let mut app = Choko::new("test");
+        app.put("/items/{id}", |_req| async {
+            Ok(Response::json(json!({"method": "PUT"})))
+        });
+        app.delete("/items/{id}", |_req| async {
+            Ok(Response::json(json!({"method": "DELETE"})))
+        });
+        app.patch("/items/{id}", |_req| async {
+            Ok(Response::json(json!({"method": "PATCH"})))
+        });
+
+        for method in &["PUT", "DELETE", "PATCH"] {
+            let resp = app
+                .dispatch(make_apigw_request(method, "/items/1", None))
+                .await
+                .unwrap();
+            assert_eq!(resp.status_code, 200);
+            let body: Value = serde_json::from_str(match resp.body.as_ref().unwrap() {
+                Body::Text(s) => s,
+                _ => panic!("expected text body"),
+            })
+            .unwrap();
+            assert_eq!(body["method"], *method);
+        }
     }
 }
